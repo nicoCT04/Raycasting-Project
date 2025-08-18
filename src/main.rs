@@ -140,25 +140,29 @@ fn main() {
     fov: PI / 3.0,
   };
 
+  let mut mode_2d = false;
+
   while !window.window_should_close() {
     // 1. clear framebuffer
     framebuffer.clear();
 
     // 2. move the player on user input
-    process_events(&mut player, &window);
+    process_events(&mut player, &window, &maze, block_size);
+
 
     let mut mode = "3D";
 
-    if window.is_key_down(KeyboardKey::KEY_M) {
-      mode = if mode == "2D" { "3D" } else { "2D" };
+    if window.is_key_pressed(KeyboardKey::KEY_M) {
+    mode_2d = !mode_2d;
     }
 
     // 3. draw stuff
-    if mode == "2D" {
-      render_maze(&mut framebuffer, &maze, block_size, &player);
+    if mode_2d {
+        render_maze(&mut framebuffer, &maze, block_size, &player);
     } else {
-      render_world(&mut framebuffer, &maze, block_size, &player);
+        render_world(&mut framebuffer, &maze, block_size, &player);
     }
+
 
     // 4. swap buffers
     framebuffer.swap_buffers(&mut window, &raylib_thread);
