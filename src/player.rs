@@ -39,4 +39,16 @@ pub fn process_events(player: &mut Player, rl: &RaylibHandle, maze: &Maze, block
         player.pos.x = next_x;
         player.pos.y = next_y;
     }
+
+    // Sensibilidad del mouse 
+    const MOUSE_SENSITIVITY: f32 = 0.003;
+
+    // Rotación por mouse (solo horizontal)
+    let md = rl.get_mouse_delta();    // Vector2: x,y
+    player.a += md.x * MOUSE_SENSITIVITY;
+
+    // normalizar ángulo para que no crezca indefinidamente
+    if player.a > std::f32::consts::PI { player.a -= 2.0*std::f32::consts::PI; }
+    if player.a < -std::f32::consts::PI { player.a += 2.0*std::f32::consts::PI; }
+
 }

@@ -185,6 +185,9 @@ fn main() {
     .log_level(TraceLogLevel::LOG_WARNING)
     .build();
 
+  //Captura el mouse desde el inicio (modo 3D)
+  window.disable_cursor();
+  
   let mut framebuffer = Framebuffer::new(window_width as u32, window_height as u32);
   framebuffer.set_background_color(Color::new(50, 50, 100, 255));
 
@@ -207,6 +210,11 @@ fn main() {
       // 3) toggle modo
       if window.is_key_pressed(KeyboardKey::KEY_M) {
           mode_2d = !mode_2d;
+          if mode_2d {
+              window.enable_cursor();   // suelta el cursor (modo 2D)
+          } else {
+              window.disable_cursor();  // captura el cursor (modo 3D)
+          }
       }
 
       // 4) render según modo
