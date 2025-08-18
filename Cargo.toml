@@ -1,0 +1,11 @@
+[package]
+name = "computer-graphics-v3"
+version = "0.1.0"
+edition = "2024"
+
+[profile.dev]
+opt-level = 3
+debug = false
+
+[dependencies]
+raylib = "5.5.1"
