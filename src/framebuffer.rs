@@ -49,9 +49,20 @@ impl Framebuffer {
         window: &mut RaylibHandle,
         raylib_thread: &RaylibThread,
     ) {
-        if let Ok(texture) = window.load_texture_from_image(raylib_thread, &self.color_buffer) {
-            let mut renderer = window.begin_drawing(raylib_thread);
-            renderer.draw_texture(&texture, 0, 0, Color::WHITE);
-        }
+        // 1) Cargar la textura en una variable aparte (salimos del if let)
+        let texture = match window.load_texture_from_image(raylib_thread, &self.color_buffer) {
+            Ok(tex) => tex,
+            Err(_) => return, // si falla, salimos silenciosamente
+        };
+
+        // 2) Lee FPS ANTES de begin_drawing (evita doble préstamo)
+        let fps = window.get_fps();
+
+        // 3) dibuja
+        let mut renderer = window.begin_drawing(raylib_thread);
+        // renderer.clear_background(Color::BLACK); // opcional
+        renderer.draw_texture(&texture, 0, 0, Color::WHITE);
+        renderer.draw_text(&format!("FPS: {}", fps), 10, 10, 20, Color::LIME);
+        // renderer se libera aquí automáticamente
     }
 }
