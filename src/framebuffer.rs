@@ -65,4 +65,24 @@ impl Framebuffer {
         renderer.draw_text(&format!("FPS: {}", fps), 10, 10, 20, Color::LIME);
         // renderer se libera aquí automáticamente
     }
+
+    pub fn present_with_ui<F: FnOnce(&mut RaylibDrawHandle)>(
+        &self,
+        window: &mut RaylibHandle,
+        raylib_thread: &RaylibThread,
+        ui: F,
+    ) {
+        let texture = match window.load_texture_from_image(raylib_thread, &self.color_buffer) {
+            Ok(tex) => tex,
+            Err(_) => return,
+        };
+        let fps = window.get_fps();
+
+        let mut d = window.begin_drawing(raylib_thread);
+        d.draw_texture(&texture, 0, 0, Color::WHITE);
+        d.draw_text(&format!("FPS: {}", fps), 10, 10, 20, Color::LIME);
+
+        // 👇 Aquí dibujamos overlays de acuerdo al estado (desde main.rs)
+        ui(&mut d);
+    }
 }

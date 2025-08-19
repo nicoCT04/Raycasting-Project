@@ -1,6 +1,9 @@
 // main.rs
 #![allow(unused_imports)]
 #![allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GameState { Title, LevelSelect, Playing, Win }
+
 
 mod line;
 mod framebuffer;
@@ -18,6 +21,8 @@ use raylib::prelude::*;
 use std::thread;
 use std::time::Duration;
 use std::f32::consts::PI;
+
+use crate::maze::world_to_cell;
 
 fn cell_to_color(cell: char) -> Color {
   match cell {
@@ -157,21 +162,35 @@ fn render_world(
     let a = player.a - (player.fov / 2.0) + (player.fov * current_ray);
     let intersect = cast_ray(framebuffer, &maze, &player, a, block_size, false);
 
-    // Calculate the height of the stake
-    let distance_to_wall = intersect.distance;// how far is this wall from the player
-    let distance_to_projection_plane = 70.0; // how far is the "player" from the "camera"
-    // this ratio doesn't really matter as long as it is a function of distance
-    let stake_height = (hh / distance_to_wall) * distance_to_projection_plane;
+    // --- Parche anti-freeze (drop-in) ---
+    let mut dist = intersect.distance;
+    // evita infinito/NaN y distancias casi cero
+    if !dist.is_finite() { dist = 1.0; }
+    if dist < 0.0005 { dist = 0.0005; }
 
-    // Calculate the position to draw the stake
-    let stake_top = (hh - (stake_height / 2.0)) as usize;
-    let stake_bottom = (hh + (stake_height / 2.0)) as usize;
+    let distance_to_projection_plane = 70.0;
+    let stake_height = (hh / dist) * distance_to_projection_plane;
 
-    // Draw the stake directly in the framebuffer
-    for y in stake_top..stake_bottom {
-      framebuffer.set_pixel(i, y as u32); // Assuming white color for the stake
+    // Calcula top/bottom como i32 para poder recortar
+    let stake_top_i32 = (hh - (stake_height / 2.0)) as i32;
+    let stake_bottom_i32 = (hh + (stake_height / 2.0)) as i32;
+
+    // Recorta a límites de pantalla [0, height]
+    let h_i32 = framebuffer.height as i32;
+    let start = stake_top_i32.clamp(0, h_i32);
+    let end   = stake_bottom_i32.clamp(0, h_i32);
+
+    // Dibuja seguro dentro de la pantalla
+    for y in start..end {
+        framebuffer.set_pixel(i, y as u32);
     }
   }
+}
+
+fn player_on_goal(player: &Player, maze: &Maze, block_size: usize) -> bool {
+    let (i, j) = world_to_cell(player.pos.x, player.pos.y, block_size);
+    if i >= maze.len() || j >= maze[i].len() { return false; }
+    maze[i][j] == 'g'
 }
 
 fn main() {
@@ -191,7 +210,7 @@ fn main() {
   let mut framebuffer = Framebuffer::new(window_width as u32, window_height as u32);
   framebuffer.set_background_color(Color::new(50, 50, 100, 255));
 
-  let maze = load_maze("assets/maps/level1.txt");
+  let mut maze = load_maze("assets/maps/level1.txt");
   let mut player = Player {
     pos: Vector2::new(150.0, 150.0),
     a: PI / 3.0,
@@ -199,42 +218,136 @@ fn main() {
   };
 
   let mut mode_2d = false;
+  let mut state = GameState::Title;
+  let levels: Vec<&str> = vec![
+      "assets/maps/level1.txt",
+      "assets/maps/level2.txt",
+      "assets/maps/level3.txt"
+  ];
+  let mut selected_level: usize = 0;
+
+  // cursor: libre en menús, capturado en juego
+  window.enable_cursor();
 
   while !window.window_should_close() {
-      // 1) limpiar
       framebuffer.clear();
 
-      // 2) input / movimiento
-      process_events(&mut player, &window, &maze, block_size);
+      match state {
+          GameState::Title => {
+              // Input
+              if window.is_key_pressed(KeyboardKey::KEY_ENTER) {
+                  state = if levels.len() > 1 { GameState::LevelSelect } else { GameState::Playing };
+                  if state == GameState::Playing {
+                      // (re)carga nivel 0 y entra a jugar
+                      // si quieres, reubica al jugador aquí
+                      window.disable_cursor();
+                  } else {
+                      window.enable_cursor();
+                  }
+              }
 
-      // 3) toggle modo
-      if window.is_key_pressed(KeyboardKey::KEY_M) {
-          mode_2d = !mode_2d;
-          if mode_2d {
-              window.enable_cursor();   // suelta el cursor (modo 2D)
-          } else {
-              window.disable_cursor();  // captura el cursor (modo 3D)
+              // Fondo simple (2D) para no dejar la pantalla vacía
+              render_maze(&mut framebuffer, &maze, block_size, &player);
+
+              // Presentar con overlay de UI
+              framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
+                  d.draw_text("RAYCASTER", 40, 40, 48, Color::YELLOW);
+                  d.draw_text("Presiona ENTER para empezar", 40, 110, 24, Color::WHITE);
+                  d.draw_text("Presiona M para alternar 2D/3D durante el juego", 40, 140, 20, Color::GRAY);
+                  d.draw_text("Controles: W/S mover, A/D girar, Mouse mirar", 40, 170, 20, Color::GRAY);
+              });
+          }
+
+          GameState::LevelSelect => {
+              // Navegación
+              if window.is_key_pressed(KeyboardKey::KEY_DOWN) {
+                  selected_level = (selected_level + 1) % levels.len();
+              }
+              if window.is_key_pressed(KeyboardKey::KEY_UP) {
+                  selected_level = (selected_level + levels.len() - 1) % levels.len();
+              }
+              if window.is_key_pressed(KeyboardKey::KEY_ENTER) {
+                maze = load_maze(levels[selected_level]);
+                // reubica jugador  spawn fijo:
+                player.pos = Vector2::new(150.0, 150.0);
+                player.a = PI / 3.0;
+                mode_2d = false;
+
+                state = GameState::Playing;
+                window.disable_cursor();
+              }
+              if window.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
+                  state = GameState::Title;
+              }
+
+              render_maze(&mut framebuffer, &maze, block_size, &player);
+
+              framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
+                  d.draw_text("Selecciona nivel:", 40, 40, 32, Color::YELLOW);
+                  for (idx, path) in levels.iter().enumerate() {
+                      let y = 90 + (idx as i32)*28;
+                      let color = if idx == selected_level { Color::LIME } else { Color::WHITE };
+                      d.draw_text(path, 60, y, 22, color);
+                  }
+                  d.draw_text("ENTER: jugar   ESC: volver", 40, 140 + (levels.len() as i32)*28, 20, Color::GRAY);
+              });
+          }
+
+          GameState::Playing => {
+              // Input + movimiento
+              process_events(&mut player, &window, &maze, block_size);
+
+              // WIN check
+              if player_on_goal(&player, &maze, block_size) {
+                // (opcional) reproducir SFX de victoria aquí
+                state = GameState::LevelSelect;
+                window.enable_cursor();
+                mode_2d = false;            
+                // resetear posición/ángulo del jugador:
+                player.pos = Vector2::new(150.0, 150.0);
+                player.a = PI / 3.0;
+                continue;
+              }
+
+              // Toggle 2D/3D con M (persistente)
+              if window.is_key_pressed(KeyboardKey::KEY_M) {
+                  mode_2d = !mode_2d;
+                  // (opcional) cursor libre en 2D, capturado en 3D
+                  if mode_2d { window.enable_cursor(); } else { window.disable_cursor(); }
+              }
+
+              if mode_2d {
+                  // Vista 2D top-down
+                  render_maze(&mut framebuffer, &maze, block_size, &player);
+              } else {
+                  // Vista 3D + minimapa
+                  render_world(&mut framebuffer, &maze, block_size, &player);
+                  render_minimap(&mut framebuffer, &maze, block_size, &player, 1200, 10, 8);
+              }
+
+              framebuffer.present_with_ui(&mut window, &raylib_thread, |_| {});
+          }
+
+          GameState::Win => {
+              // Volver a Title o repetir
+              if window.is_key_pressed(KeyboardKey::KEY_ENTER) {
+                  state = GameState::Title;
+                  window.enable_cursor();
+              }
+
+              // Pantalla simple de victoria
+              render_maze(&mut framebuffer, &maze, block_size, &player);
+
+              framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
+                  d.draw_text("¡Nivel completado!", 40, 40, 36, Color::GOLD);
+                  d.draw_text("ENTER: volver al menu", 40, 90, 24, Color::WHITE);
+              });
           }
       }
 
-      // 4) render según modo
-      if mode_2d {
-          // 2D top-down
-          render_maze(&mut framebuffer, &maze, block_size, &player);
-      } else {
-          // 3D raycasting
-          render_world(&mut framebuffer, &maze, block_size, &player);
-
-          // Overlay: minimapa en esquina (ajusta posición/escala)
-          render_minimap(&mut framebuffer, &maze, block_size, &player, 1200, 10, 8);
-      }
-
-      // 5) presentar
-      framebuffer.swap_buffers(&mut window, &raylib_thread);
-
-      // 6) limitar ~60 fps
       thread::sleep(Duration::from_millis(16));
-}
+  }
+
 
 }
 
