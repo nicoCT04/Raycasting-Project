@@ -3,6 +3,12 @@
 #![allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GameState { Title, LevelSelect, Playing, Win }
+struct Assets {
+    initial: Texture2D,
+    win: Texture2D,
+    wall_grid: Texture2D,
+    floor: Texture2D,
+}
 
 
 mod line;
@@ -193,6 +199,14 @@ fn player_on_goal(player: &Player, maze: &Maze, block_size: usize) -> bool {
     maze[i][j] == 'g'
 }
 
+fn draw_fullscreen(d: &mut RaylibDrawHandle, tex: &Texture2D, w: i32, h: i32) {
+    // Dibuja la textura escalada a toda la ventana
+    let src = Rectangle::new(0.0, 0.0, tex.width as f32, tex.height as f32);
+    let dest = Rectangle::new(0.0, 0.0, w as f32, h as f32);
+    d.draw_texture_pro(tex, src, dest, Vector2::new(0.0, 0.0), 0.0, Color::WHITE);
+}
+
+
 fn main() {
   let window_width = 1300;
   let window_height = 900;
@@ -209,6 +223,21 @@ fn main() {
   
   let mut framebuffer = Framebuffer::new(window_width as u32, window_height as u32);
   framebuffer.set_background_color(Color::new(50, 50, 100, 255));
+
+  let assets = Assets {
+    initial: window
+        .load_texture(&raylib_thread, "assets/textures/initial_page2.jpg")
+        .expect("initial_page.png no encontrada"),
+    win: window
+        .load_texture(&raylib_thread, "assets/textures/win_page2.jpg")
+        .expect("win_page.png no encontrada"),
+    wall_grid: window
+        .load_texture(&raylib_thread, "assets/textures/wall_grid.jpg")
+        .expect("wall_grid.png no encontrada"),
+    floor: window
+        .load_texture(&raylib_thread, "assets/textures/floor.jpg")
+        .expect("floor.png no encontrada"),
+  };
 
   let mut maze = load_maze("assets/maps/level1.txt");
   let mut player = Player {
@@ -238,8 +267,6 @@ fn main() {
               if window.is_key_pressed(KeyboardKey::KEY_ENTER) {
                   state = if levels.len() > 1 { GameState::LevelSelect } else { GameState::Playing };
                   if state == GameState::Playing {
-                      // (re)carga nivel 0 y entra a jugar
-                      // si quieres, reubica al jugador aquí
                       window.disable_cursor();
                   } else {
                       window.enable_cursor();
@@ -251,10 +278,11 @@ fn main() {
 
               // Presentar con overlay de UI
               framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
-                  d.draw_text("RAYCASTER", 40, 40, 48, Color::YELLOW);
-                  d.draw_text("Presiona ENTER para empezar", 40, 110, 24, Color::WHITE);
-                  d.draw_text("Presiona M para alternar 2D/3D durante el juego", 40, 140, 20, Color::GRAY);
-                  d.draw_text("Controles: W/S mover, A/D girar, Mouse mirar", 40, 170, 20, Color::GRAY);
+                  draw_fullscreen(d, &assets.initial, window_width, window_height); // 👈 fondo
+                  d.draw_text("RAYCASTER", 500, 300, 48, Color::YELLOW);
+                  d.draw_text("Presiona ENTER para empezar", 400, 540, 24, Color::WHITE);
+                  d.draw_text("Presiona M para alternar 2D/3D durante el juego", 400, 570, 20, Color::GRAY);
+                  d.draw_text("Controles: W/S mover, A/D girar, Mouse mirar", 400, 600, 20, Color::GRAY);
               });
           }
 
@@ -299,15 +327,12 @@ fn main() {
 
               // WIN check
               if player_on_goal(&player, &maze, block_size) {
-                // (opcional) reproducir SFX de victoria aquí
-                state = GameState::LevelSelect;
-                window.enable_cursor();
-                mode_2d = false;            
-                // resetear posición/ángulo del jugador:
-                player.pos = Vector2::new(150.0, 150.0);
-                player.a = PI / 3.0;
-                continue;
+                  state = GameState::Win;     // 👈 ir a Win, no a LevelSelect
+                  window.enable_cursor();
+                  mode_2d = false;
+                  continue;                   // saltar el render del frame actual
               }
+
 
               // Toggle 2D/3D con M (persistente)
               if window.is_key_pressed(KeyboardKey::KEY_M) {
@@ -339,9 +364,11 @@ fn main() {
               render_maze(&mut framebuffer, &maze, block_size, &player);
 
               framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
-                  d.draw_text("¡Nivel completado!", 40, 40, 36, Color::GOLD);
-                  d.draw_text("ENTER: volver al menu", 40, 90, 24, Color::WHITE);
-              });
+                draw_fullscreen(d, &assets.win, window_width, window_height); // 👈 fondo
+                d.draw_text("¡FELICIDADES!", 40, 40, 36, Color::GOLD);
+                d.draw_text("¡Nivel completado!", 40, 80, 36, Color::GOLD);
+                d.draw_text("ENTER: volver al menu", 40, 130, 24, Color::WHITE);
+                });
           }
       }
 
