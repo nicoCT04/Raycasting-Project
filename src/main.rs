@@ -30,6 +30,37 @@ use std::time::Duration;
 use std::f32::consts::PI;
 
 use crate::maze::world_to_cell;
+struct CpuImage {
+    w: usize,
+    h: usize,
+    pixels: Vec<Color>,
+}
+
+impl CpuImage {
+    fn from_path(path: &str) -> Self {
+        // Carga
+        let img = Image::load_image(path).expect("No pude cargar la imagen de pared");
+        let w = img.width as usize;
+        let h = img.height as usize;
+
+        // Obtén los colores (ImageColors -> Vec<Color>)
+        let colors = img.get_image_data();              
+        let pixels: Vec<Color> = colors.to_vec();
+
+        Self { w, h, pixels }
+    }
+
+    #[inline]
+    fn sample_repeat(&self, u: f32, v: f32) -> Color {
+        let uu = u.rem_euclid(1.0);
+        let vv = v.clamp(0.0, 1.0);
+        let x = (uu * (self.w as f32 - 1.0)) as usize;
+        let y = (vv * (self.h as f32 - 1.0)) as usize;
+        self.pixels[y * self.w + x]
+    }
+}
+
+
 
 fn scale_color(c: Color, f: f32) -> Color {
     let fr = (c.r as f32 * f).clamp(0.0, 255.0) as u8;
@@ -57,24 +88,14 @@ fn draw_scanlines(d: &mut RaylibDrawHandle, w: i32, h: i32, spacing: i32, alpha:
 
 
 fn cell_to_color(cell: char) -> Color {
-  match cell {
-    '+' => {
-      return Color::BLUEVIOLET;
-    },
-    '-' => {
-      return Color::VIOLET;
-    },
-    '|' => {
-      return Color::VIOLET;
-    },
-    'g' => {
-      return Color::GREEN;
-    },
-    _ => {
-      return Color::WHITE;
-    },
-  }
+    match cell {
+        '+' | '|' | '-' => Color::new(0, 210, 255, 255),  // cian más suave (no tan chillón)
+        'g'             => Color::new(255, 130, 20, 255), // naranja un poco más cálido
+        _               => Color::new(16, 20, 32, 255),   // fallback oscuro (poco probable)
+    }
 }
+
+
 
 fn draw_cell(
   framebuffer: &mut Framebuffer,
@@ -101,34 +122,38 @@ fn render_minimap(
     maze: &Maze,
     block_size: usize,
     player: &Player,
-    origin_x: usize, // esquina donde va el minimapa
+    origin_x: usize,
     origin_y: usize,
-    scale: usize,    // tamaño de celda del minimapa (p.ej. 4 px)
+    scale: usize,
 ) {
-    // 1) celdas del laberinto
+    // (opcional) fondo oscuro para que resalten los neones
+    let map_w = maze[0].len() * scale;
+    let map_h = maze.len() * scale;
+    framebuffer.set_current_color(Color::new(8, 10, 18, 255));
+    for x in origin_x..origin_x + map_w {
+        for y in origin_y..origin_y + map_h {
+            framebuffer.set_pixel(x as u32, y as u32);
+        }
+    }
+
+    // celdas
     for (i, row) in maze.iter().enumerate() {
         for (j, &cell) in row.iter().enumerate() {
-            let color = match cell {
-                ' ' => Color::new(0, 0, 0, 0),       // transparente (no dibujar)
-                'g' => Color::GREEN,                  // meta
-                '+' => Color::BLUEVIOLET,
-                '-' | '|' => Color::VIOLET,
-                _ => Color::WHITE,
-            };
-            if color.a > 0 {
-                framebuffer.set_current_color(color);
-                let xo = origin_x + j * scale;
-                let yo = origin_y + i * scale;
-                for x in xo..xo + scale {
-                    for y in yo..yo + scale {
-                        framebuffer.set_pixel(x as u32, y as u32);
-                    }
+            if cell == ' ' { continue; } // ← no pintes vacío
+            let color = tron_wall_color(cell);
+            framebuffer.set_current_color(color);
+
+            let xo = origin_x + j * scale;
+            let yo = origin_y + i * scale;
+            for x in xo..xo + scale {
+                for y in yo..yo + scale {
+                    framebuffer.set_pixel(x as u32, y as u32);
                 }
             }
         }
     }
 
-    // 2) jugador (punto)
+    // jugador
     framebuffer.set_current_color(Color::YELLOW);
     let px = (player.pos.x / block_size as f32) * scale as f32;
     let py = (player.pos.y / block_size as f32) * scale as f32;
@@ -136,13 +161,11 @@ fn render_minimap(
     let pyi = origin_y as f32 + py;
     framebuffer.set_pixel(pxi as u32, pyi as u32);
 
-    // 3) dirección del jugador (línea corta)
+    // dirección del jugador
+    framebuffer.set_current_color(Color::ORANGE);
     let dir_len = (scale as f32 * 2.0).max(6.0);
     let dx = player.a.cos() * dir_len;
     let dy = player.a.sin() * dir_len;
-
-    // dibuja línea con el método que uses (aquí a mano, pasos Bresenham simple)
-    framebuffer.set_current_color(Color::ORANGE);
     let steps = dir_len as i32;
     for t in 0..=steps {
         let x = pxi + dx * (t as f32 / steps as f32);
@@ -181,18 +204,16 @@ fn render_world(
     maze: &Maze,
     block_size: usize,
     player: &Player,
+    wall_tex: &CpuImage,   // textura CPU
     tron_time: f32,
 ) {
     let num_rays = framebuffer.width;
-    let hh = framebuffer.height as f32 / 2.0; // half height
-
-    // Color base por si algo se dibuja fuera (no es obligatorio)
-    framebuffer.set_current_color(Color::WHITESMOKE);
+    let hh = framebuffer.height as f32 / 2.0;
 
     for i in 0..num_rays {
         // Ángulo del rayo i-ésimo dentro del FOV
-        let current_ray = i as f32 / num_rays as f32;
-        let a = player.a - (player.fov / 2.0) + (player.fov * current_ray);
+        let t = i as f32 / num_rays as f32;
+        let a = player.a - (player.fov / 2.0) + (player.fov * t);
 
         // Raycast
         let intersect = cast_ray(framebuffer, maze, player, a, block_size, false);
@@ -203,41 +224,66 @@ fn render_world(
         if dist < 0.0005 { dist = 0.0005; }
 
         // Proyección de columna
-        let distance_to_projection_plane = 70.0;
-        let stake_height = (hh / dist) * distance_to_projection_plane;
+        let dpp = 70.0;
+        let stake_h = (hh / dist) * dpp;
+        let stake_top = (hh - (stake_h * 0.5)) as i32;
+        let stake_bot = (hh + (stake_h * 0.5)) as i32;
 
-        let stake_top_i32 = (hh - (stake_height / 2.0)) as i32;
-        let stake_bottom_i32 = (hh + (stake_height / 2.0)) as i32;
-
-        // Clamp a pantalla
+        // Clamp vertical
         let h_i32 = framebuffer.height as i32;
-        let start = stake_top_i32.clamp(0, h_i32);
-        let end   = stake_bottom_i32.clamp(0, h_i32);
+        let start = stake_top.clamp(0, h_i32);
+        let end   = stake_bot.clamp(0, h_i32);
+        if end <= start { continue; }
 
-        // Estimar celda golpeada para elegir color TRON
-        // (usamos la distancia y el ángulo para aproximar el punto de impacto)
+        // Punto de impacto aproximado (para calcular u/v)
         let hit_x = player.pos.x + dist * a.cos();
         let hit_y = player.pos.y + dist * a.sin();
+
+        // Fracciones dentro de la celda (0..1) robustas con negativos
+        let fx = ((hit_x / block_size as f32).fract() + 1.0).fract();
+        let fy = ((hit_y / block_size as f32).fract() + 1.0).fract();
+
+        // ¿pared vertical u horizontal? (elige el borde más cercano)
+        let edge_x = fx.min(1.0 - fx);
+        let edge_y = fy.min(1.0 - fy);
+        let u = if edge_x < edge_y { fy } else { fx }; // convención clásica
+
+        // Para “g” (meta) opcionalmente tintamos la textura a naranja
         let (ci, cj) = world_to_cell(hit_x, hit_y, block_size);
         let cell_ch = if ci < maze.len() && cj < maze[ci].len() { maze[ci][cj] } else { ' ' };
 
-        // Paleta TRON + sombreado por distancia + pulso
-        let base = tron_wall_color(cell_ch);                 // cian para paredes, naranja para 'g'
-        let pulse = (tron_time * 3.0).sin() * 0.06;         // ±6% de pulso
+        // Sombreado suave (igual que el look TRON)
+        let pulse = (tron_time * 3.0).sin() * 0.06;
         let dist_falloff = (1.15 / (1.0 + dist * 0.025)).clamp(0.22, 1.0);
         let column_gain = (dist_falloff + pulse).clamp(0.18, 1.0);
 
-        // Dibujar la columna con leve glow en bordes
+        // Dibujo de la columna muestreando textura (u, v)
+        let denom = (end - start).max(1) as f32;
         for y in start..end {
-            let edge = (y - start).min(end - y) as f32;     // cercanía al borde superior/inferior
-            let glow = if edge < 4.0 { 0.18 } else { 0.0 }; // brillo sutil en bordes
-            let gain = (column_gain + glow).clamp(0.18, 1.0);
+            let v = (y - start) as f32 / denom;     // 0..1 a lo largo de la columna
+            let mut col = wall_tex.sample_repeat(u, v);
 
-            framebuffer.set_current_color(scale_color(base, gain));
+            // (Opcional) tintar meta 'g' hacia naranja
+            if cell_ch == 'g' {
+                // Mezcla rápida hacia naranja TRON
+                let tint = Color::new(255, 140, 0, 255);
+                col = Color::new(
+                    (col.r as f32 * 0.4 + tint.r as f32 * 0.6) as u8,
+                    (col.g as f32 * 0.4 + tint.g as f32 * 0.6) as u8,
+                    (col.b as f32 * 0.4 + tint.b as f32 * 0.6) as u8,
+                    255
+                );
+            }
+
+            // Aplicar caída/pulso
+            col = scale_color(col, column_gain);
+
+            framebuffer.set_current_color(col);
             framebuffer.set_pixel(i, y as u32);
         }
     }
 }
+
 
 
 fn player_on_goal(player: &Player, maze: &Maze, block_size: usize) -> bool {
@@ -307,6 +353,7 @@ fn main() {
         .expect("floor.png no encontrada"),
   };
 
+  let wall_cpu = CpuImage::from_path("assets/textures/wall_grid.jpg");
   let mut maze = load_maze("assets/maps/level1.txt");
   let mut player = Player {
     pos: Vector2::new(150.0, 150.0),
@@ -386,9 +433,8 @@ fn main() {
                   state = GameState::Title;
               }
 
-              render_maze(&mut framebuffer, &maze, block_size, &player);
-
               framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
+                  draw_fullscreen(d, &assets.initial, window_width, window_height);
                   d.draw_text("Selecciona nivel:", 40, 40, 32, Color::YELLOW);
                   for (idx, path) in levels.iter().enumerate() {
                       let y = 90 + (idx as i32)*28;
@@ -431,7 +477,7 @@ fn main() {
                   render_maze(&mut framebuffer, &maze, block_size, &player);
               } else {
                   // Vista 3D + minimapa
-                  render_world(&mut framebuffer, &maze, block_size, &player, tron_time);
+                  render_world(&mut framebuffer, &maze, block_size, &player, &wall_cpu, tron_time);
                   render_minimap(&mut framebuffer, &maze, block_size, &player, 1200, 10, 8);
               }
 
