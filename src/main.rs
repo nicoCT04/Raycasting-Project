@@ -6,8 +6,6 @@ enum GameState { Title, LevelSelect, Playing, Win }
 struct Assets {
     initial: Texture2D,
     win: Texture2D,
-    wall_grid: Texture2D,
-    floor: Texture2D,
 }
 
 
@@ -204,16 +202,20 @@ fn render_world(
     maze: &Maze,
     block_size: usize,
     player: &Player,
-    wall_tex: &CpuImage,   // textura CPU
+    wall_tex: &CpuImage,
+    floor_tex: &CpuImage,
+    sky_tex: &CpuImage,
     tron_time: f32,
 ) {
-    let num_rays = framebuffer.width;
-    let hh = framebuffer.height as f32 / 2.0;
+    let w = framebuffer.width as i32;
+    let h = framebuffer.height as i32;
+    let hh = h as f32 * 0.5;
 
-    for i in 0..num_rays {
-        // Ángulo del rayo i-ésimo dentro del FOV
-        let t = i as f32 / num_rays as f32;
-        let a = player.a - (player.fov / 2.0) + (player.fov * t);
+    for i in 0..w {
+        // Ángulo del rayo para esta columna
+        let t = i as f32 / w as f32;
+        let a = player.a - (player.fov * 0.5) + (player.fov * t);
+        let dir = Vector2::new(a.cos(), a.sin());
 
         // Raycast
         let intersect = cast_ray(framebuffer, maze, player, a, block_size, false);
@@ -223,66 +225,118 @@ fn render_world(
         if !dist.is_finite() { dist = 1.0; }
         if dist < 0.0005 { dist = 0.0005; }
 
-        // Proyección de columna
+        // Proyección de pared
         let dpp = 70.0;
         let stake_h = (hh / dist) * dpp;
-        let stake_top = (hh - (stake_h * 0.5)) as i32;
-        let stake_bot = (hh + (stake_h * 0.5)) as i32;
+        let wall_top = (hh - stake_h * 0.5) as i32;
+        let wall_bot = (hh + stake_h * 0.5) as i32;
 
-        // Clamp vertical
-        let h_i32 = framebuffer.height as i32;
-        let start = stake_top.clamp(0, h_i32);
-        let end   = stake_bot.clamp(0, h_i32);
-        if end <= start { continue; }
+        let start = wall_top.clamp(0, h);
+        let end   = wall_bot.clamp(0, h);
 
-        // Punto de impacto aproximado (para calcular u/v)
-        let hit_x = player.pos.x + dist * a.cos();
-        let hit_y = player.pos.y + dist * a.sin();
+        // ---------------------------
+        //  A) CIELO / FONDO (0..start)
+        // ---------------------------
+        if start > 0 {
+            // Por cada fila del “cielo”, calculamos una distancia “negativa”
+            // simétrica al piso para mapear una textura panorámica.
+            // rowDist ≈ (hh / (hh - y)) * dpp
+            for y in 0..start {
+                let denom = hh - y as f32;
+                if denom.abs() < 0.0001 { continue; }
+                let row_dist = (hh / denom) * dpp;
 
-        // Fracciones dentro de la celda (0..1) robustas con negativos
-        let fx = ((hit_x / block_size as f32).fract() + 1.0).fract();
-        let fy = ((hit_y / block_size as f32).fract() + 1.0).fract();
+                let wx = player.pos.x + dir.x * row_dist;
+                let wy = player.pos.y + dir.y * row_dist;
 
-        // ¿pared vertical u horizontal? (elige el borde más cercano)
-        let edge_x = fx.min(1.0 - fx);
-        let edge_y = fy.min(1.0 - fy);
-        let u = if edge_x < edge_y { fy } else { fx }; // convención clásica
+                let u = ((wx / block_size as f32).fract() + 1.0).fract();
+                let v = ((wy / block_size as f32).fract() + 1.0).fract();
 
-        // Para “g” (meta) opcionalmente tintamos la textura a naranja
-        let (ci, cj) = world_to_cell(hit_x, hit_y, block_size);
-        let cell_ch = if ci < maze.len() && cj < maze[ci].len() { maze[ci][cj] } else { ' ' };
+                let mut col = sky_tex.sample_repeat(u, v);
+                // leve atenuación hacia arriba
+                let sky_gain = (0.65 + (y as f32 / hh) * 0.2).clamp(0.5, 0.95);
+                col = scale_color(col, sky_gain);
 
-        // Sombreado suave (igual que el look TRON)
-        let pulse = (tron_time * 3.0).sin() * 0.06;
-        let dist_falloff = (1.15 / (1.0 + dist * 0.025)).clamp(0.22, 1.0);
-        let column_gain = (dist_falloff + pulse).clamp(0.18, 1.0);
-
-        // Dibujo de la columna muestreando textura (u, v)
-        let denom = (end - start).max(1) as f32;
-        for y in start..end {
-            let v = (y - start) as f32 / denom;     // 0..1 a lo largo de la columna
-            let mut col = wall_tex.sample_repeat(u, v);
-
-            // (Opcional) tintar meta 'g' hacia naranja
-            if cell_ch == 'g' {
-                // Mezcla rápida hacia naranja TRON
-                let tint = Color::new(255, 140, 0, 255);
-                col = Color::new(
-                    (col.r as f32 * 0.4 + tint.r as f32 * 0.6) as u8,
-                    (col.g as f32 * 0.4 + tint.g as f32 * 0.6) as u8,
-                    (col.b as f32 * 0.4 + tint.b as f32 * 0.6) as u8,
-                    255
-                );
+                framebuffer.set_current_color(col);
+                framebuffer.set_pixel(i as u32, y as u32);
             }
+        }
 
-            // Aplicar caída/pulso
-            col = scale_color(col, column_gain);
+        // ---------------------------------
+        //  B) PARED (start..end) con textura
+        // ---------------------------------
+        if end > start {
+            // Punto de impacto para u/v en pared
+            let hit_x = player.pos.x + dist * dir.x;
+            let hit_y = player.pos.y + dist * dir.y;
 
-            framebuffer.set_current_color(col);
-            framebuffer.set_pixel(i, y as u32);
+            let fx = ((hit_x / block_size as f32).fract() + 1.0).fract();
+            let fy = ((hit_y / block_size as f32).fract() + 1.0).fract();
+
+            // ¿vertical u horizontal?
+            let edge_x = fx.min(1.0 - fx);
+            let edge_y = fy.min(1.0 - fy);
+            let u_wall = if edge_x < edge_y { fy } else { fx };
+
+            // Qué celda golpeamos (para tintar 'g')
+            let (ci, cj) = world_to_cell(hit_x, hit_y, block_size);
+            let cell_ch = if ci < maze.len() && cj < maze[ci].len() { maze[ci][cj] } else { ' ' };
+
+            // Sombreado suave tipo TRON
+            let pulse = (tron_time * 3.0).sin() * 0.06;
+            let dist_falloff = (1.15 / (1.0 + dist * 0.025)).clamp(0.22, 1.0);
+            let column_gain = (dist_falloff + pulse).clamp(0.18, 1.0);
+
+            let denom = (end - start).max(1) as f32;
+            for y in start..end {
+                let v_wall = (y - start) as f32 / denom; // 0..1 a lo largo de la columna
+                let mut col = wall_tex.sample_repeat(u_wall, v_wall);
+
+                // Opcional: tintar meta 'g' hacia naranja
+                if cell_ch == 'g' {
+                    let tint = Color::new(255, 140, 0, 255);
+                    col = Color::new(
+                        (col.r as f32 * 0.4 + tint.r as f32 * 0.6) as u8,
+                        (col.g as f32 * 0.4 + tint.g as f32 * 0.6) as u8,
+                        (col.b as f32 * 0.4 + tint.b as f32 * 0.6) as u8,
+                        255
+                    );
+                }
+
+                col = scale_color(col, column_gain);
+                framebuffer.set_current_color(col);
+                framebuffer.set_pixel(i as u32, y as u32);
+            }
+        }
+
+        // ---------------------------
+        //  C) PISO (end..h)
+        // ---------------------------
+        if end < h {
+            for y in end..h {
+                let denom = y as f32 - hh;
+                if denom.abs() < 0.0001 { continue; }
+                let row_dist = (hh / denom) * dpp;
+
+                let wx = player.pos.x + dir.x * row_dist;
+                let wy = player.pos.y + dir.y * row_dist;
+
+                let u = ((wx / block_size as f32).fract() + 1.0).fract();
+                let v = ((wy / block_size as f32).fract() + 1.0).fract();
+
+                let mut col = floor_tex.sample_repeat(u, v);
+
+                // Sombras por distancia para piso
+                let floor_gain = (0.95 / (1.0 + row_dist * 0.01)).clamp(0.25, 0.9);
+                col = scale_color(col, floor_gain);
+
+                framebuffer.set_current_color(col);
+                framebuffer.set_pixel(i as u32, y as u32);
+            }
         }
     }
 }
+
 
 
 
@@ -345,15 +399,11 @@ fn main() {
     win: window
         .load_texture(&raylib_thread, "assets/textures/win_page2.jpg")
         .expect("win_page.png no encontrada"),
-    wall_grid: window
-        .load_texture(&raylib_thread, "assets/textures/wall_grid.jpg")
-        .expect("wall_grid.png no encontrada"),
-    floor: window
-        .load_texture(&raylib_thread, "assets/textures/floor.jpg")
-        .expect("floor.png no encontrada"),
   };
 
-  let wall_cpu = CpuImage::from_path("assets/textures/wall_grid.jpg");
+  let wall_cpu = CpuImage::from_path("assets/textures/wall_grid4.jpg");
+  let floor_cpu = CpuImage::from_path("assets/textures/floor3.jpg");
+  let sky_cpu   = CpuImage::from_path("assets/textures/wall_grid.jpg");
   let mut maze = load_maze("assets/maps/level1.txt");
   let mut player = Player {
     pos: Vector2::new(150.0, 150.0),
@@ -397,9 +447,6 @@ fn main() {
                       window.enable_cursor();
                   }
               }
-
-              // Fondo simple (2D) para no dejar la pantalla vacía
-              render_maze(&mut framebuffer, &maze, block_size, &player);
 
               // Presentar con overlay de UI
               framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
@@ -477,7 +524,11 @@ fn main() {
                   render_maze(&mut framebuffer, &maze, block_size, &player);
               } else {
                   // Vista 3D + minimapa
-                  render_world(&mut framebuffer, &maze, block_size, &player, &wall_cpu, tron_time);
+                  render_world(
+                    &mut framebuffer, &maze, block_size, &player,
+                    &wall_cpu, &floor_cpu, &sky_cpu, tron_time,
+                  );
+
                   render_minimap(&mut framebuffer, &maze, block_size, &player, 1200, 10, 8);
               }
 
@@ -492,9 +543,6 @@ fn main() {
                   state = GameState::Title;
                   window.enable_cursor();
               }
-
-              // Pantalla simple de victoria
-              render_maze(&mut framebuffer, &maze, block_size, &player);
 
               framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
                 draw_fullscreen(d, &assets.win, window_width, window_height); // 👈 fondo
