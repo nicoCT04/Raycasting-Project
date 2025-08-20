@@ -26,6 +26,7 @@ use raylib::prelude::*;
 use std::thread;
 use std::time::Duration;
 use std::f32::consts::PI;
+use std::collections::HashMap;
 
 use crate::maze::world_to_cell;
 struct CpuImage {
@@ -55,6 +56,26 @@ impl CpuImage {
         let x = (uu * (self.w as f32 - 1.0)) as usize;
         let y = (vv * (self.h as f32 - 1.0)) as usize;
         self.pixels[y * self.w + x]
+    }
+}
+
+struct WallTex {
+    default: CpuImage,
+    map: HashMap<char, CpuImage>, // por ejemplo: '+', '-', '|', '1', '2', 'g'
+}
+
+impl WallTex {
+    fn new(default: CpuImage) -> Self {
+        Self { default, map: HashMap::new() }
+    }
+
+    fn insert(&mut self, ch: char, tex: CpuImage) {
+        self.map.insert(ch, tex);
+    }
+
+    #[inline]
+    fn for_cell(&self, ch: char) -> &CpuImage {
+        self.map.get(&ch).unwrap_or(&self.default)
     }
 }
 
@@ -202,7 +223,7 @@ fn render_world(
     maze: &Maze,
     block_size: usize,
     player: &Player,
-    wall_tex: &CpuImage,
+    walls: &WallTex,          
     floor_tex: &CpuImage,
     sky_tex: &CpuImage,
     tron_time: f32,
@@ -238,9 +259,6 @@ fn render_world(
         //  A) CIELO / FONDO (0..start)
         // ---------------------------
         if start > 0 {
-            // Por cada fila del “cielo”, calculamos una distancia “negativa”
-            // simétrica al piso para mapear una textura panorámica.
-            // rowDist ≈ (hh / (hh - y)) * dpp
             for y in 0..start {
                 let denom = hh - y as f32;
                 if denom.abs() < 0.0001 { continue; }
@@ -253,7 +271,6 @@ fn render_world(
                 let v = ((wy / block_size as f32).fract() + 1.0).fract();
 
                 let mut col = sky_tex.sample_repeat(u, v);
-                // leve atenuación hacia arriba
                 let sky_gain = (0.65 + (y as f32 / hh) * 0.2).clamp(0.5, 0.95);
                 col = scale_color(col, sky_gain);
 
@@ -278,9 +295,10 @@ fn render_world(
             let edge_y = fy.min(1.0 - fy);
             let u_wall = if edge_x < edge_y { fy } else { fx };
 
-            // Qué celda golpeamos (para tintar 'g')
+            // Celda golpeada (elige textura)
             let (ci, cj) = world_to_cell(hit_x, hit_y, block_size);
             let cell_ch = if ci < maze.len() && cj < maze[ci].len() { maze[ci][cj] } else { ' ' };
+            let wall_img = walls.for_cell(cell_ch);
 
             // Sombreado suave tipo TRON
             let pulse = (tron_time * 3.0).sin() * 0.06;
@@ -289,10 +307,10 @@ fn render_world(
 
             let denom = (end - start).max(1) as f32;
             for y in start..end {
-                let v_wall = (y - start) as f32 / denom; // 0..1 a lo largo de la columna
-                let mut col = wall_tex.sample_repeat(u_wall, v_wall);
+                let v_wall = (y - start) as f32 / denom; // 0..1
+                let mut col = wall_img.sample_repeat(u_wall, v_wall);
 
-                // Opcional: tintar meta 'g' hacia naranja
+                // (Opcional) si quieres teñir la meta 'g' aunque tenga su propia textura, deja esto:
                 if cell_ch == 'g' {
                     let tint = Color::new(255, 140, 0, 255);
                     col = Color::new(
@@ -326,7 +344,6 @@ fn render_world(
 
                 let mut col = floor_tex.sample_repeat(u, v);
 
-                // Sombras por distancia para piso
                 let floor_gain = (0.95 / (1.0 + row_dist * 0.01)).clamp(0.25, 0.9);
                 col = scale_color(col, floor_gain);
 
@@ -336,9 +353,6 @@ fn render_world(
         }
     }
 }
-
-
-
 
 fn player_on_goal(player: &Player, maze: &Maze, block_size: usize) -> bool {
     let (i, j) = world_to_cell(player.pos.x, player.pos.y, block_size);
@@ -364,7 +378,7 @@ fn main() {
 
   let (mut window, raylib_thread) = raylib::init()
     .size(window_width, window_height)
-    .title("Raycaster Example")
+    .title("Raycaster Project")
     .log_level(TraceLogLevel::LOG_WARNING)
     .build();
 
@@ -401,9 +415,19 @@ fn main() {
         .expect("win_page.png no encontrada"),
   };
 
-  let wall_cpu = CpuImage::from_path("assets/textures/wall_grid4.jpg");
+  let mut walls = WallTex::new(CpuImage::from_path("assets/textures/wall_grid4.jpg")); // default
+
+  // Opcionales por tipo de celda
+  walls.insert('+', CpuImage::from_path("assets/textures/wall_grid8.jpg"));
+  walls.insert('|', CpuImage::from_path("assets/textures/wall_grid7.jpg"));
+  walls.insert('-', CpuImage::from_path("assets/textures/wall_grid3.jpg"));
+  // meta 'g' también tenga su propia textura:
+  walls.insert('g', CpuImage::from_path("assets/textures/wall_grid6.jpg"));
+
   let floor_cpu = CpuImage::from_path("assets/textures/floor3.jpg");
   let sky_cpu   = CpuImage::from_path("assets/textures/wall_grid.jpg");
+
+  
   let mut maze = load_maze("assets/maps/level1.txt");
   let mut player = Player {
     pos: Vector2::new(150.0, 150.0),
@@ -525,10 +549,9 @@ fn main() {
               } else {
                   // Vista 3D + minimapa
                   render_world(
-                    &mut framebuffer, &maze, block_size, &player,
-                    &wall_cpu, &floor_cpu, &sky_cpu, tron_time,
+                      &mut framebuffer, &maze, block_size, &player,
+                      &walls, &floor_cpu, &sky_cpu, tron_time,
                   );
-
                   render_minimap(&mut framebuffer, &maze, block_size, &player, 1200, 10, 8);
               }
 
