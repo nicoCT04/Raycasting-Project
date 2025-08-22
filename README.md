@@ -81,7 +81,7 @@ Proyecto-Raycasting/
 
 ## ✨ **Gameplay Video**✨ 
 
-<p align="center">eplay (Juego.mov)](assets/screenshots/Juego.mov)
+<p align="center">
   <a href="https://youtu.be/D4xmeFDghpI">
     <img src="assets/screenshots/principal.png" width="400" alt="Gameplay Video (clikc the image)"/>
   </a>
