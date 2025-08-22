@@ -79,28 +79,37 @@ Proyecto-Raycasting/
 
 ---
 
+## ✨ **Gameplay Video**✨ **Gameplay Video**
+
+<p align="center">eplay (Juego.mov)](assets/screenshots/Juego.mov)
+  <a href="https://youtu.be/D4xmeFDghpI">
+    <img src="assets/screenshots/principal.png" width="400" alt="Gameplay Video"/>
+  </a>
+</p> **Credits**
+<p align="center">
+  <b>Click the image to watch the video (Juego.mov)</b>*Developer:** Nicolás Concuá
+</p>- **Universidad del Valle de Guatemala**
+puter Graphics
+---
+
 ## 💡 **Credits**
 
 - **Developer:** Nicolás Concuá
-- **Universidad del Valle de Guatemala**
-- **Course:** Computer Graphics
+- **Universidad del Valle de Guatemala**Rust](https://www.rust-lang.org/)
+- **Course:** Computer Graphics- [Raylib-rs](https://github.com/deltaphc/raylib-rs)
 
----
+------
 
 ## 🛠️ **Technologies**
 
-- [Rust](https://www.rust-lang.org/)
-- [Raylib-rs](https://github.com/deltaphc/raylib-rs)
+- [Rust](https://www.rust-lang.org/)stions or suggestions?  
+- [Raylib-rs](https://github.com/deltaphc/raylib-rs)Write to: [nicoconcua@gmail.com](mailto:nicoconcua@gmail.com)
 
----
+------
 
 ## 📬 **Contact**
-
-Questions or suggestions?  
-Write to: [nicoconcua@gmail.com](mailto:nicoconcua@gmail.com)
-
----
-
-<p align="center">
+  <b>Enjoy the TRON experience and challenge the mazes!</b>
+Questions or suggestions?  >
+Write to: [nicoconcua@gmail.com](mailto:nicoconcua@gmail.com)---<p align="center">
   <b>Enjoy the TRON experience and challenge the mazes!</b>
 </p>
