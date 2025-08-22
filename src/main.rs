@@ -385,6 +385,7 @@ fn main() {
   let window_width = 1300;
   let window_height = 900;
   let block_size = 150;
+  let minimap_block_size = 100;
 
   let (mut window, raylib_thread) = raylib::init()
     .size(window_width, window_height)
@@ -567,7 +568,7 @@ fn main() {
               }
 
                 if mode_2d {
-                    render_maze(&mut framebuffer, &maze, block_size, &player);
+                    render_maze(&mut framebuffer, &maze, minimap_block_size, &player);
                 } else {
                     // Vista 3D + minimapa
                     depth.fill(f32::INFINITY); // ← limpia el buffer cada frame
@@ -582,7 +583,7 @@ fn main() {
                     for s in sprites.iter_mut() { s.update(dt); }
                     render_sprites(&mut framebuffer, &player, &mut sprites, block_size, &depth);
 
-                    render_minimap(&mut framebuffer, &maze, block_size, &player, 1200, 10, 8);
+                    render_minimap(&mut framebuffer, &maze, minimap_block_size, &player, 1200, 10, 8);
                 }
                 // ...existing code...
 
