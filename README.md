@@ -105,8 +105,8 @@ Proyecto-Raycasting/
 ------
 
 ## 📬 **Contact**
-  <b>Enjoy the TRON experience and challenge the mazes!</b>
-Questions or suggestions?  >
-Write to: [nicoconcua@gmail.com](mailto:nicoconcua@gmail.com)---<p align="center">
+  <b>Questions or suggestions? </b>
+Write to: [nicoconcua@gmail.com](mailto:nicoconcua@gmail.com)
+<p align="center">
   <b>Enjoy the TRON experience and challenge the mazes!</b>
 </p>
