@@ -374,7 +374,7 @@ fn is_walking(win: &RaylibHandle) -> bool {
 fn main() {
   let window_width = 1300;
   let window_height = 900;
-  let block_size = 100;
+  let block_size = 150;
 
   let (mut window, raylib_thread) = raylib::init()
     .size(window_width, window_height)
@@ -493,7 +493,7 @@ fn main() {
               if window.is_key_pressed(KeyboardKey::KEY_ENTER) {
                 maze = load_maze(levels[selected_level]);
                 // reubica jugador  spawn fijo:
-                player.pos = Vector2::new(150.0, 150.0);
+                player.pos = Vector2::new(190.0, 190.0);
                 player.a = PI / 3.0;
                 mode_2d = false;
 
