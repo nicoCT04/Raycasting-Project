@@ -1,7 +1,8 @@
 // main.rs
 #![allow(unused_imports)]
 #![allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Copy, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 enum GameState { Title, LevelSelect, Playing, Win }
 struct Assets {
     initial: Texture2D,
@@ -14,6 +15,7 @@ mod framebuffer;
 mod maze;
 mod caster;
 mod player;
+mod sprite;
 
 use line::line;
 use maze::{Maze,load_maze};
@@ -21,6 +23,7 @@ use caster::{cast_ray, Intersect};
 use framebuffer::Framebuffer;
 use player::{Player, process_events};
 use raylib::audio::{RaylibAudio, Music, Sound};
+use sprite::{Sprite, load_frames, render_sprites};
 
 use raylib::prelude::*;
 use std::thread;
@@ -29,14 +32,15 @@ use std::f32::consts::PI;
 use std::collections::HashMap;
 
 use crate::maze::world_to_cell;
-struct CpuImage {
-    w: usize,
-    h: usize,
-    pixels: Vec<Color>,
+#[derive(Clone)]
+pub struct CpuImage {
+    pub w: usize,
+    pub h: usize,
+    pub pixels: Vec<Color>,
 }
 
 impl CpuImage {
-    fn from_path(path: &str) -> Self {
+    pub fn from_path(path: &str) -> Self {
         // Carga
         let img = Image::load_image(path).expect("No pude cargar la imagen de pared");
         let w = img.width as usize;
@@ -50,7 +54,7 @@ impl CpuImage {
     }
 
     #[inline]
-    fn sample_repeat(&self, u: f32, v: f32) -> Color {
+    pub fn sample_repeat(&self, u: f32, v: f32) -> Color {
         let uu = u.rem_euclid(1.0);
         let vv = v.clamp(0.0, 1.0);
         let x = (uu * (self.w as f32 - 1.0)) as usize;
@@ -227,6 +231,7 @@ fn render_world(
     floor_tex: &CpuImage,
     sky_tex: &CpuImage,
     tron_time: f32,
+    depth: &mut [f32],
 ) {
     let w = framebuffer.width as i32;
     let h = framebuffer.height as i32;
@@ -245,6 +250,11 @@ fn render_world(
         let mut dist = intersect.distance;
         if !dist.is_finite() { dist = 1.0; }
         if dist < 0.0005 { dist = 0.0005; }
+
+        // Guarda la distancia del muro para esta columna:
+        if let Some(slot) = depth.get_mut(i as usize) {
+            *slot = dist;
+        }
 
         // Proyección de pared
         let dpp = 70.0;
@@ -447,9 +457,22 @@ fn main() {
   // cursor: libre en menús, capturado en juego
   window.enable_cursor();
   let mut step_cd: f32 = 0.0;
-
   let mut tron_time: f32 = 0.0;
+  let screen_w = framebuffer.width as usize;
+  let mut depth = vec![f32::INFINITY; screen_w];
 
+  let orb_frames = load_frames(&[
+    "assets/sprites/moto5.png",
+    "assets/sprites/moto5.png",
+    "assets/sprites/moto4.png",
+    "assets/sprites/moto4.png",
+    ]);
+
+    let mut sprites = vec![
+        Sprite::new(Vector2::new(450.0, 260.0), orb_frames.clone(), 6.0, 1.0),
+        Sprite::new(Vector2::new(700.0, 400.0), orb_frames.clone(), 6.0, 1.0),
+        Sprite::new(Vector2::new(300.0, 600.0), orb_frames.clone(), 6.0, 1.0),
+    ];
 
   while !window.window_should_close() {
       framebuffer.clear();
@@ -543,17 +566,25 @@ fn main() {
                   if mode_2d { window.enable_cursor(); } else { window.disable_cursor(); }
               }
 
-              if mode_2d {
-                  // Vista 2D top-down
-                  render_maze(&mut framebuffer, &maze, block_size, &player);
-              } else {
-                  // Vista 3D + minimapa
-                  render_world(
-                      &mut framebuffer, &maze, block_size, &player,
-                      &walls, &floor_cpu, &sky_cpu, tron_time,
-                  );
-                  render_minimap(&mut framebuffer, &maze, block_size, &player, 1200, 10, 8);
-              }
+                if mode_2d {
+                    render_maze(&mut framebuffer, &maze, block_size, &player);
+                } else {
+                    // Vista 3D + minimapa
+                    depth.fill(f32::INFINITY); // ← limpia el buffer cada frame
+
+                    render_world(
+                        &mut framebuffer, &maze, block_size, &player,
+                        &walls, &floor_cpu, &sky_cpu, tron_time,
+                        &mut depth, // 👈 pásale el buffer
+                    );
+
+                    // Actualiza y dibuja sprites
+                    for s in sprites.iter_mut() { s.update(dt); }
+                    render_sprites(&mut framebuffer, &player, &mut sprites, block_size, &depth);
+
+                    render_minimap(&mut framebuffer, &maze, block_size, &player, 1200, 10, 8);
+                }
+                // ...existing code...
 
               framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
                 draw_scanlines(d, window_width, window_height, 2, 40);
