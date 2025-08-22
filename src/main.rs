@@ -1,15 +1,24 @@
 // main.rs
+
+//! Proyecto Raycaster para Gráficas por Computadora UVG
+//! Juego tipo TRON con vista 3D y minimapa 2D dinámico.
+//! Autor: Nicolas Concua
+
 #![allow(unused_imports)]
 #![allow(dead_code)]
+
+/// Estados principales del juego.
 #[derive(Copy, Debug, PartialEq, Eq)]
 #[derive(Clone)]
 enum GameState { Title, LevelSelect, Playing, Win }
+
+/// Texturas para las pantallas inicial y de victoria.
 struct Assets {
     initial: Texture2D,
     win: Texture2D,
 }
 
-
+// Módulos propios para organización del código.
 mod line;
 mod framebuffer;
 mod maze;
@@ -32,6 +41,8 @@ use std::f32::consts::PI;
 use std::collections::HashMap;
 
 use crate::maze::world_to_cell;
+
+/// Imagen en CPU para texturizar paredes, piso y cielo.
 #[derive(Clone)]
 pub struct CpuImage {
     pub w: usize,
@@ -40,6 +51,7 @@ pub struct CpuImage {
 }
 
 impl CpuImage {
+    /// Carga una imagen desde disco y la convierte a formato CpuImage.
     pub fn from_path(path: &str) -> Self {
         // Carga
         let img = Image::load_image(path).expect("No pude cargar la imagen de pared");
@@ -53,6 +65,7 @@ impl CpuImage {
         Self { w, h, pixels }
     }
 
+    /// Muestra un color de la imagen usando coordenadas normalizadas (u,v).
     #[inline]
     pub fn sample_repeat(&self, u: f32, v: f32) -> Color {
         let uu = u.rem_euclid(1.0);
@@ -63,28 +76,32 @@ impl CpuImage {
     }
 }
 
+/// Estructura para manejar las texturas de las paredes.
+/// Permite asociar una textura distinta a cada tipo de celda.
 struct WallTex {
     default: CpuImage,
     map: HashMap<char, CpuImage>, // por ejemplo: '+', '-', '|', '1', '2', 'g'
 }
 
 impl WallTex {
+    /// Crea la estructura con una textura por defecto.
     fn new(default: CpuImage) -> Self {
         Self { default, map: HashMap::new() }
     }
 
+    /// Asocia una textura a un tipo de celda.
     fn insert(&mut self, ch: char, tex: CpuImage) {
         self.map.insert(ch, tex);
     }
 
+    /// Obtiene la textura correspondiente a una celda.
     #[inline]
     fn for_cell(&self, ch: char) -> &CpuImage {
         self.map.get(&ch).unwrap_or(&self.default)
     }
 }
 
-
-
+/// Aplica un factor de brillo a un color.
 fn scale_color(c: Color, f: f32) -> Color {
     let fr = (c.r as f32 * f).clamp(0.0, 255.0) as u8;
     let fg = (c.g as f32 * f).clamp(0.0, 255.0) as u8;
@@ -92,6 +109,7 @@ fn scale_color(c: Color, f: f32) -> Color {
     Color::new(fr, fg, fb, c.a)
 }
 
+/// Devuelve el color neón para cada tipo de pared en el minimapa.
 fn tron_wall_color(cell: char) -> Color {
     match cell {
         '+' | '|' | '-' => Color::new(0, 255, 255, 255),     // cian neón
@@ -100,6 +118,7 @@ fn tron_wall_color(cell: char) -> Color {
     }
 }
 
+/// Dibuja líneas horizontales semitransparentes para efecto de scanlines.
 fn draw_scanlines(d: &mut RaylibDrawHandle, w: i32, h: i32, spacing: i32, alpha: u8) {
     let line_color = Color::new(0, 0, 0, alpha);
     let mut y = 0;
@@ -109,7 +128,7 @@ fn draw_scanlines(d: &mut RaylibDrawHandle, w: i32, h: i32, spacing: i32, alpha:
     }
 }
 
-
+/// Color de cada celda en el render 2D.
 fn cell_to_color(cell: char) -> Color {
     match cell {
         '+' | '|' | '-' => Color::new(0, 210, 255, 255),  // cian más suave (no tan chillón)
@@ -118,8 +137,7 @@ fn cell_to_color(cell: char) -> Color {
     }
 }
 
-
-
+/// Dibuja una celda del minimapa o del render 2D.
 fn draw_cell(
   framebuffer: &mut Framebuffer,
   xo: usize,
@@ -140,6 +158,8 @@ fn draw_cell(
   }
 }
 
+/// Renderiza el minimapa, ajustando tamaño y posición según parámetros.
+/// El minimapa muestra paredes, jugador y dirección.
 fn render_minimap(
     framebuffer: &mut Framebuffer,
     maze: &Maze,
@@ -149,7 +169,6 @@ fn render_minimap(
     origin_y: usize,
     scale: usize,
 ) {
-    // (opcional) fondo oscuro para que resalten los neones
     let map_w = maze[0].len() * scale;
     let map_h = maze.len() * scale;
     framebuffer.set_current_color(Color::new(8, 10, 18, 255));
@@ -197,6 +216,7 @@ fn render_minimap(
     }
 }
 
+/// Renderiza el mundo en modo 2D (vista cenital).
 pub fn render_maze(
   framebuffer: &mut Framebuffer,
   maze: &Maze,
@@ -213,7 +233,7 @@ pub fn render_maze(
 
   framebuffer.set_current_color(Color::WHITESMOKE);
 
-  // draw what the player sees
+  // dibujar lo que el jugador ve
   let num_rays = 5;
   for i in 0..num_rays {
     let current_ray = i as f32 / num_rays as f32; // current ray divided by total rays
@@ -222,6 +242,8 @@ pub fn render_maze(
   }
 }
 
+/// Renderiza el mundo en modo 3D usando raycasting.
+/// Incluye texturizado de paredes, piso y cielo.
 fn render_world(
     framebuffer: &mut Framebuffer,
     maze: &Maze,
@@ -364,12 +386,14 @@ fn render_world(
     }
 }
 
+/// Verifica si el jugador está sobre la meta 'g'.
 fn player_on_goal(player: &Player, maze: &Maze, block_size: usize) -> bool {
     let (i, j) = world_to_cell(player.pos.x, player.pos.y, block_size);
     if i >= maze.len() || j >= maze[i].len() { return false; }
     maze[i][j] == 'g'
 }
 
+/// Dibuja una textura a pantalla completa (pantallas de inicio y victoria).
 fn draw_fullscreen(d: &mut RaylibDrawHandle, tex: &Texture2D, w: i32, h: i32) {
     // Dibuja la textura escalada a toda la ventana
     let src = Rectangle::new(0.0, 0.0, tex.width as f32, tex.height as f32);
@@ -377,97 +401,100 @@ fn draw_fullscreen(d: &mut RaylibDrawHandle, tex: &Texture2D, w: i32, h: i32) {
     d.draw_texture_pro(tex, src, dest, Vector2::new(0.0, 0.0), 0.0, Color::WHITE);
 }
 
+/// Determina si el jugador está caminando (para reproducir SFX de pasos).
 fn is_walking(win: &RaylibHandle) -> bool {
     win.is_key_down(KeyboardKey::KEY_W) || win.is_key_down(KeyboardKey::KEY_S)
 }
 
+/// Función principal del juego.
+/// Maneja el ciclo principal, estados, renderizado y entrada de usuario.
 fn main() {
-  let window_width = 1300;
-  let window_height = 900;
-  let block_size = 150;
-  let minimap_block_size = 100;
+    let window_width = 1300;
+    let window_height = 900;
+    let block_size = 150;
+    let minimap_block_size = 150;
 
-  let (mut window, raylib_thread) = raylib::init()
-    .size(window_width, window_height)
-    .title("Raycaster Project")
-    .log_level(TraceLogLevel::LOG_WARNING)
-    .build();
+    let (mut window, raylib_thread) = raylib::init()
+        .size(window_width, window_height)
+        .title("Raycaster Project")
+        .log_level(TraceLogLevel::LOG_WARNING)
+        .build();
 
-  //Musica
-  let audio = RaylibAudio::init_audio_device()
-      .expect("No se pudo inicializar el dispositivo de audio");
+    //Musica
+    let audio = RaylibAudio::init_audio_device()
+        .expect("No se pudo inicializar el dispositivo de audio");
 
-  // Música de fondo
-  let music = audio.new_music("assets/music/tronMusic.ogg")
-      .expect("Falta assets/music/tronMusic.ogg");
-  music.set_volume(0.3);     // opcional
-  music.play_stream();       // ¡a sonar!
+    // Música de fondo
+    let music = audio.new_music("assets/music/tronMusic.ogg")
+        .expect("Falta assets/music/tronMusic.ogg");
+    music.set_volume(0.3);    
+    music.play_stream();      
 
-  // SFX
-  let step_sfx = audio.new_sound("assets/sfx/motor.ogg")
-      .expect("Falta assets/sfx/motor.ogg");
-  step_sfx.set_volume(0.8);
-  let win_sfx = audio.new_sound("assets/sfx/winSound.mp3")
-      .expect("Falta assets/sfx/winSound.mp3");
+    // SFX
+    let step_sfx = audio.new_sound("assets/sfx/motor.ogg")
+        .expect("Falta assets/sfx/motor.ogg");
+    step_sfx.set_volume(0.8);
+    let win_sfx = audio.new_sound("assets/sfx/winSound.mp3")
+        .expect("Falta assets/sfx/winSound.mp3");
 
 
-  //Captura el mouse desde el inicio (modo 3D)
-  window.disable_cursor();
-  
-  let mut framebuffer = Framebuffer::new(window_width as u32, window_height as u32);
-  framebuffer.set_background_color(Color::new(50, 50, 100, 255));
+    //Captura el mouse desde el inicio (modo 3D)
+    window.disable_cursor();
+    
+    let mut framebuffer = Framebuffer::new(window_width as u32, window_height as u32);
+    framebuffer.set_background_color(Color::new(50, 50, 100, 255));
 
-  let assets = Assets {
-    initial: window
-        .load_texture(&raylib_thread, "assets/textures/initial_page2.jpg")
-        .expect("initial_page.png no encontrada"),
-    win: window
-        .load_texture(&raylib_thread, "assets/textures/win_page2.jpg")
-        .expect("win_page.png no encontrada"),
-  };
+    let assets = Assets {
+        initial: window
+            .load_texture(&raylib_thread, "assets/textures/initial_page2.jpg")
+            .expect("initial_page.png no encontrada"),
+        win: window
+            .load_texture(&raylib_thread, "assets/textures/win_page2.jpg")
+            .expect("win_page.png no encontrada"),
+    };
 
-  let mut walls = WallTex::new(CpuImage::from_path("assets/textures/wall_grid4.jpg")); // default
+    let mut walls = WallTex::new(CpuImage::from_path("assets/textures/wall_grid4.jpg"));
 
-  // Opcionales por tipo de celda
-  walls.insert('+', CpuImage::from_path("assets/textures/wall_grid8.jpg"));
-  walls.insert('|', CpuImage::from_path("assets/textures/wall_grid7.jpg"));
-  walls.insert('-', CpuImage::from_path("assets/textures/wall_grid3.jpg"));
-  // meta 'g' también tenga su propia textura:
-  walls.insert('g', CpuImage::from_path("assets/textures/wall_grid6.jpg"));
+    // Opcionales por tipo de celda
+    walls.insert('+', CpuImage::from_path("assets/textures/wall_grid8.jpg"));
+    walls.insert('|', CpuImage::from_path("assets/textures/wall_grid7.jpg"));
+    walls.insert('-', CpuImage::from_path("assets/textures/wall_grid3.jpg"));
+    // meta 'g' también tenga su propia textura:
+    walls.insert('g', CpuImage::from_path("assets/textures/wall_grid6.jpg"));
 
-  let floor_cpu = CpuImage::from_path("assets/textures/floor3.jpg");
-  let sky_cpu   = CpuImage::from_path("assets/textures/wall_grid.jpg");
+    let floor_cpu = CpuImage::from_path("assets/textures/floor3.jpg");
+    let sky_cpu   = CpuImage::from_path("assets/textures/wall_grid.jpg");
 
-  
-  let mut maze = load_maze("assets/maps/level1.txt");
-  let mut player = Player {
-    pos: Vector2::new(150.0, 150.0),
-    a: PI / 3.0,
-    fov: PI / 3.0,
-  };
+    
+    let mut maze = load_maze("assets/maps/level1.txt");
+    let mut player = Player {
+        pos: Vector2::new(150.0, 150.0),
+        a: PI / 3.0,
+        fov: PI / 3.0,
+    };
 
-  let mut mode_2d = false;
-  let mut state = GameState::Title;
-  let levels: Vec<&str> = vec![
-      "assets/maps/level1.txt",
-      "assets/maps/level2.txt",
-      "assets/maps/level3.txt"
-  ];
-  let mut selected_level: usize = 0;
+    let mut mode_2d = false;
+    let mut state = GameState::Title;
+    let levels: Vec<&str> = vec![
+        "assets/maps/level1.txt",
+        "assets/maps/level2.txt",
+        "assets/maps/level3.txt"
+    ];
+    let mut selected_level: usize = 0;
 
-  // cursor: libre en menús, capturado en juego
-  window.enable_cursor();
-  let mut step_cd: f32 = 0.0;
-  let mut tron_time: f32 = 0.0;
-  let screen_w = framebuffer.width as usize;
-  let mut depth = vec![f32::INFINITY; screen_w];
+    // cursor: libre en menús, capturado en juego
+    window.enable_cursor();
+    let mut step_cd: f32 = 0.0;
+    let mut tron_time: f32 = 0.0;
+    let screen_w = framebuffer.width as usize;
+    let mut depth = vec![f32::INFINITY; screen_w];
 
-  let orb_frames = load_frames(&[
-    "assets/sprites/moto5.png",
-    "assets/sprites/moto5.png",
-    "assets/sprites/moto4.png",
-    "assets/sprites/moto4.png",
-    ]);
+    let orb_frames = load_frames(&[
+        "assets/sprites/moto5.png",
+        "assets/sprites/moto5.png",
+        "assets/sprites/moto4.png",
+        "assets/sprites/moto4.png",
+        ]);
 
     let mut sprites = vec![
         Sprite::new(Vector2::new(450.0, 260.0), orb_frames.clone(), 6.0, 1.0),
@@ -475,100 +502,118 @@ fn main() {
         Sprite::new(Vector2::new(300.0, 600.0), orb_frames.clone(), 6.0, 1.0),
     ];
 
-  while !window.window_should_close() {
-      framebuffer.clear();
+    while !window.window_should_close() {
+        framebuffer.clear();
+        let dt = window.get_frame_time();
+        if step_cd > 0.0 { step_cd -= dt; }
+        music.update_stream();
+        tron_time += dt;
 
-      let dt = window.get_frame_time();
-      if step_cd > 0.0 { step_cd -= dt; }
-      music.update_stream();
-      tron_time += dt;
 
+        match state {
+            GameState::Title => {
+                // Input
+                if window.is_key_pressed(KeyboardKey::KEY_ENTER) {
+                    state = if levels.len() > 1 { GameState::LevelSelect } else { GameState::Playing };
+                    if state == GameState::Playing {
+                        window.disable_cursor();
+                    } else {
+                        window.enable_cursor();
+                    }
+                }
 
-      match state {
-          GameState::Title => {
-              // Input
-              if window.is_key_pressed(KeyboardKey::KEY_ENTER) {
-                  state = if levels.len() > 1 { GameState::LevelSelect } else { GameState::Playing };
-                  if state == GameState::Playing {
-                      window.disable_cursor();
-                  } else {
-                      window.enable_cursor();
-                  }
-              }
-
-              // Presentar con overlay de UI
-              framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
-                  draw_fullscreen(d, &assets.initial, window_width, window_height); // 👈 fondo
-                  d.draw_text("RAYCASTER", 500, 300, 48, Color::YELLOW);
-                  d.draw_text("Presiona ENTER para empezar", 400, 440, 24, Color::WHITE);
-                  d.draw_text("Presiona M para alternar 2D/3D durante el juego", 400, 470, 20, Color::GRAY);
-                  d.draw_text("Controles: W/S mover, A/D girar, Mouse mirar", 400, 500, 20, Color::GRAY);
-              });
-          }
-
-          GameState::LevelSelect => {
-              // Navegación
-              if window.is_key_pressed(KeyboardKey::KEY_DOWN) {
-                  selected_level = (selected_level + 1) % levels.len();
-              }
-              if window.is_key_pressed(KeyboardKey::KEY_UP) {
-                  selected_level = (selected_level + levels.len() - 1) % levels.len();
-              }
-              if window.is_key_pressed(KeyboardKey::KEY_ENTER) {
-                maze = load_maze(levels[selected_level]);
-                // reubica jugador  spawn fijo:
-                player.pos = Vector2::new(190.0, 190.0);
-                player.a = PI / 3.0;
-                mode_2d = false;
-
-                state = GameState::Playing;
-                window.disable_cursor();
-              }
-              if window.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
-                  state = GameState::Title;
-              }
-
-              framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
-                  draw_fullscreen(d, &assets.initial, window_width, window_height);
-                  d.draw_text("Selecciona nivel:", 40, 40, 32, Color::YELLOW);
-                  for (idx, path) in levels.iter().enumerate() {
-                      let y = 90 + (idx as i32)*28;
-                      let color = if idx == selected_level { Color::LIME } else { Color::WHITE };
-                      d.draw_text(path, 60, y, 22, color);
-                  }
-                  d.draw_text("ENTER: jugar   ESC: volver", 40, 140 + (levels.len() as i32)*28, 20, Color::GRAY);
-              });
-          }
-
-          GameState::Playing => {
-            // Input + movimiento
-            process_events(&mut player, &window, &maze, block_size);
-
-            // 👇 SFX: pasos al caminar (usa tu helper is_walking)
-            if is_walking(&window) && step_cd <= 0.0 {
-                step_sfx.play();
-                step_cd = 0.15; // 4 pasos por segundo aprox
+                // Presentar con overlay de UI
+                framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
+                    draw_fullscreen(d, &assets.initial, window_width, window_height); // 👈 fondo
+                    d.draw_text("RAYCASTER", 500, 300, 48, Color::YELLOW);
+                    d.draw_text("Presiona ENTER para empezar", 400, 440, 24, Color::WHITE);
+                    d.draw_text("Presiona M para alternar 2D/3D durante el juego", 400, 470, 20, Color::GRAY);
+                    d.draw_text("Controles: W/S mover, A/D girar, Mouse mirar", 400, 500, 20, Color::GRAY);
+                });
             }
 
-            // WIN check (antes de dibujar)
-            if player_on_goal(&player, &maze, block_size) {
-                win_sfx.play(); // 👈 SFX victoria
-                state = GameState::Win;
-                window.enable_cursor();
-                mode_2d = false;
-                continue; // saltar el render de este frame
+            GameState::LevelSelect => {
+                // Navegación
+                if window.is_key_pressed(KeyboardKey::KEY_DOWN) {
+                    selected_level = (selected_level + 1) % levels.len();
+                }
+                if window.is_key_pressed(KeyboardKey::KEY_UP) {
+                    selected_level = (selected_level + levels.len() - 1) % levels.len();
+                }
+                if window.is_key_pressed(KeyboardKey::KEY_ENTER) {
+                    maze = load_maze(levels[selected_level]);
+                    // reubica jugador  spawn fijo:
+                    player.pos = Vector2::new(190.0, 190.0);
+                    player.a = PI / 3.0;
+                    mode_2d = false;
+
+                    state = GameState::Playing;
+                    window.disable_cursor();
+                }
+                if window.is_key_pressed(KeyboardKey::KEY_ESCAPE) {
+                    state = GameState::Title;
+                }
+
+                framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
+                    draw_fullscreen(d, &assets.initial, window_width, window_height);
+                    d.draw_text("Selecciona nivel:", 40, 40, 32, Color::YELLOW);
+                    for (idx, path) in levels.iter().enumerate() {
+                        let y = 90 + (idx as i32)*28;
+                        let color = if idx == selected_level { Color::LIME } else { Color::WHITE };
+                        d.draw_text(path, 60, y, 22, color);
+                    }
+                    d.draw_text("ENTER: jugar   ESC: volver", 40, 140 + (levels.len() as i32)*28, 20, Color::GRAY);
+                });
             }
 
+            GameState::Playing => {
+                // Input + movimiento
+                process_events(&mut player, &window, &maze, block_size);
 
-              // Toggle 2D/3D con M (persistente)
-              if window.is_key_pressed(KeyboardKey::KEY_M) {
-                  mode_2d = !mode_2d;
-                  // (opcional) cursor libre en 2D, capturado en 3D
-                  if mode_2d { window.enable_cursor(); } else { window.disable_cursor(); }
-              }
+                // 👇 SFX: pasos al caminar (usa tu helper is_walking)
+                if is_walking(&window) && step_cd <= 0.0 {
+                    step_sfx.play();
+                    step_cd = 0.15; // 4 pasos por segundo aprox
+                }
+
+                // WIN check (antes de dibujar)
+                if player_on_goal(&player, &maze, block_size) {
+                    win_sfx.play(); // 👈 SFX victoria
+                    state = GameState::Win;
+                    window.enable_cursor();
+                    mode_2d = false;
+                    continue; // saltar el render de este frame
+                }
+
+
+                // Toggle 2D/3D con M (persistente)
+                if window.is_key_pressed(KeyboardKey::KEY_M) {
+                    mode_2d = !mode_2d;
+                    // (opcional) cursor libre en 2D, capturado en 3D
+                    if mode_2d { window.enable_cursor(); } else { window.disable_cursor(); }
+                }
 
                 if mode_2d {
-                    render_maze(&mut framebuffer, &maze, minimap_block_size, &player);
+                    // Convierte window_width y window_height a usize
+                    let maze_w = maze[0].len();
+                    let maze_h = maze.len();
+                    let window_w_usize = window_width as usize;
+                    let window_h_usize = window_height as usize;
+                    let minimap_block_size_2d = (window_w_usize / maze_w).min(window_h_usize / maze_h);
+
+                    // Centra el minimapa en la ventana
+                    let origin_x = (window_w_usize - maze_w * minimap_block_size_2d) / 2;
+                    let origin_y = (window_h_usize - maze_h * minimap_block_size_2d) / 2;
+
+                    render_minimap(
+                        &mut framebuffer,
+                        &maze,
+                        block_size, // solo para la posición del jugador
+                        &player,
+                        origin_x,
+                        origin_y,
+                        minimap_block_size_2d,
+                    );
                 } else {
                     // Vista 3D + minimapa
                     depth.fill(f32::INFINITY); // ← limpia el buffer cada frame
@@ -583,33 +628,40 @@ fn main() {
                     for s in sprites.iter_mut() { s.update(dt); }
                     render_sprites(&mut framebuffer, &player, &mut sprites, block_size, &depth);
 
-                    render_minimap(&mut framebuffer, &maze, minimap_block_size, &player, 1200, 10, 8);
+                    render_minimap(
+                        &mut framebuffer,
+                        &maze,
+                        minimap_block_size,
+                        &player,
+                        1200,
+                        10,
+                        8,
+                    );
                 }
-                // ...existing code...
 
-              framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
-                draw_scanlines(d, window_width, window_height, 2, 40);
-              });
-          }
-
-          GameState::Win => {
-              // Volver a Title o repetir
-              if window.is_key_pressed(KeyboardKey::KEY_ENTER) {
-                  state = GameState::Title;
-                  window.enable_cursor();
-              }
-
-              framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
-                draw_fullscreen(d, &assets.win, window_width, window_height); // 👈 fondo
-                d.draw_text("¡FELICIDADES!", 450, 180, 50, Color::GOLD);
-                d.draw_text("¡Nivel completado!", 40, 320, 36, Color::GOLD);
-                d.draw_text("ENTER: volver al menu", 40, 370, 24, Color::WHITE);
+                framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
+                    draw_scanlines(d, window_width, window_height, 2, 40);
                 });
-          }
-      }
+            }
 
-      thread::sleep(Duration::from_millis(16));
-  }
+            GameState::Win => {
+                // Volver a Title o repetir
+                if window.is_key_pressed(KeyboardKey::KEY_ENTER) {
+                    state = GameState::Title;
+                    window.enable_cursor();
+                }
+
+                framebuffer.present_with_ui(&mut window, &raylib_thread, |d| {
+                    draw_fullscreen(d, &assets.win, window_width, window_height); // 👈 fondo
+                    d.draw_text("¡FELICIDADES!", 450, 180, 50, Color::GOLD);
+                    d.draw_text("¡Nivel completado!", 40, 320, 36, Color::GOLD);
+                    d.draw_text("ENTER: volver al menu", 40, 370, 24, Color::WHITE);
+                });
+            }
+        }
+
+        thread::sleep(Duration::from_millis(16));
+    }
 
 
 }
