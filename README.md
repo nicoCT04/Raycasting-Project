@@ -82,7 +82,7 @@ Proyecto-Raycasting/
 ## ✨ **Gameplay Video**✨ 
 
 <p align="center">
-  <a href="https://youtu.be/9tQhD77VZfM">
+  <a href="https://youtu.be/pTY970PW_Cw">
     <img src="assets/screenshots/principal.png" width="400" alt="Gameplay Video (clikc the image)"/>
   </a>
 </p> 
